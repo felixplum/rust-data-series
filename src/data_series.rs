@@ -5,10 +5,18 @@ use std::fmt;
 use std::ops::{Sub};
 use crate::norms;
 
+#[derive(Clone, Debug)]
 pub enum InvalidAccessPolicy {
     ReturnNone,
     ReturnClosest
 }
+
+#[derive(Clone, Debug)]
+pub enum ValueType {
+    Countable,   // extensive quantity
+    NonCountable // intensive quantity
+}
+
 pub struct DataSeries<I, V> {
     index: Vec<I>,
     values: Vec<V>,
@@ -28,7 +36,7 @@ where
 
 impl<I, V> DataSeries<I, V>
 where
-    I: std::cmp::PartialOrd
+    I: std::cmp::PartialOrd + std::fmt::Debug
 {
 
     pub fn new() -> DataSeries<I, V> {
@@ -89,16 +97,61 @@ where
     //     return (&self.index, &self.values);
     // }
 
-    fn as_projection(&self, new_axis: &Vec<I>) -> (Vec<I>, Vec<V>) {
+    fn get_projection<J>(&self, new_axis: &Vec<I>, value_type: ValueType) -> DataSeries<I, V>
+    where
+        I: std::ops::Sub<Output = J> + Copy, // index_a<I> - index_b<I> = interval<J>
+        J: std::ops::Div<Output = f32>,      // interval_a<J> / interval_b<J> = fraction<f32>
+        V: std::ops::Mul<f32, Output = V> + std::ops::Add<Output = V> + Copy
+    {
         let mut axis: Vec<I> = Vec::new();
         let mut values: Vec<V> = Vec::new();
         axis.reserve(new_axis.len());
         values.reserve(new_axis.len());
 
-        for idx in new_axis.iter() {
-            // find value in old axis, such that idx
+        assert_eq!(self.index.len(), self.values.len());
+
+        for (i_n, interval_new) in new_axis.windows(2).enumerate() {
+            for (i_o, interval_old) in self.index.windows(2).enumerate() {
+                if interval_old[1] <= interval_new[0] || interval_old[0] >= interval_new[1] {
+                    continue;
+                }
+                let boundary_left = if interval_old[0] > interval_new[0]  {
+                   &interval_old[0] 
+                } else {
+                    &interval_new[0]
+                };
+                let boundary_right = if interval_old[1] > interval_new[1]  {
+                    &interval_new[1] 
+                 } else {
+                     &interval_old[1]
+                 };
+              
+                match value_type {
+                    ValueType::Countable => {
+                        let interval_old_len = interval_old[1] - interval_old[0]; 
+                        let value_old = &self.values[i_o];
+                        let frac = (*boundary_right - *boundary_left) / interval_old_len;
+                        let value_old_rescaled = *value_old * frac;
+                        if i_n >= values.len() {
+                            values.push(value_old_rescaled);
+                            axis.push(interval_new[0]);
+                        } else {
+                            values[i_n] = values[i_n] + value_old_rescaled;
+                        }
+                    },
+                    ValueType::NonCountable => {
+
+                    }
+                } 
+            }
         }
-        return (axis, values);
+
+        let result : DataSeries<I, V> = DataSeries {
+            index: axis,
+            values: values,
+            invalid_access_policy: self.invalid_access_policy.clone()
+        };
+        return result
     }
 
     pub fn at(&self, index: &I) -> Option<&V> {
@@ -139,6 +192,7 @@ where
 mod tests {
     use crate::data_series::DataSeries;
     use crate::data_series::InvalidAccessPolicy;
+    use crate::data_series::ValueType;
 
     fn create_dataseries() -> DataSeries<u32, f32> {
         let mut ds: DataSeries<u32, f32> = DataSeries::new();
@@ -184,6 +238,17 @@ mod tests {
         let mut ds = create_dataseries();
         assert!(!ds.push_if_different(10, 5.9, 1.));
         assert!(ds.push_if_different(10, 6., 1.));
+    }
+
+    #[test]
+    fn test_get_projection() {
+        let mut ds: DataSeries<f32, f32> = DataSeries::new();
+        assert!(ds.push(1., 2.));
+        assert!(ds.push(3., 4.));
+        let new_axis: Vec<f32> = vec![1.,2.];
+        let proj = ds.get_projection(&new_axis, ValueType::Countable);
+        println!("{}", proj);
+        assert!(true);
     }
 
 }
