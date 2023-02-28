@@ -109,12 +109,17 @@ where
         values.reserve(new_axis.len());
 
         assert_eq!(self.index.len(), self.values.len());
-
+        
+        // let mut i_o_last = 0;
         for (i_n, interval_new) in new_axis.windows(2).enumerate() {
+            // i_o_last = if i_o_last > 0 {i_o_last - 1} else {0};
             for (i_o, interval_old) in self.index.windows(2).enumerate() {
+                // Intervals overlapping?
                 if interval_old[1] <= interval_new[0] || interval_old[0] >= interval_new[1] {
                     continue;
                 }
+                // i_o_last = i_o;
+                // Determnine left and right boundary of overlapping interval
                 let boundary_left = if interval_old[0] > interval_new[0]  {
                    &interval_old[0] 
                 } else {
@@ -140,11 +145,36 @@ where
                         }
                     },
                     ValueType::NonCountable => {
-
+                        let interval_new_len = interval_new[1] - interval_new[0]; 
+                        let value_old = &self.values[i_o];
+                        let frac = (*boundary_right - *boundary_left) / interval_new_len;
+                        let value_old_rescaled = *value_old * frac;
+                        if i_n >= values.len() {
+                            values.push(value_old_rescaled);
+                            axis.push(interval_new[0]);
+                        } else {
+                            values[i_n] = values[i_n] + value_old_rescaled;
+                        }
                     }
                 } 
             }
         }
+
+        // For last interval in new, check if "artifical" interval can be created
+        // match new_axis.last() {
+        //     Some(&last_idx) => {
+        //         let val = self.index.windows(2).enumerate().find(|x| {
+        //             x.1[0] >= last_idx && x.1[1] <= last_idx
+        //         });
+        //         match val {
+        //             Some(val_) => {
+
+        //             },
+        //             None => {}
+        //         }
+        //     },
+        //     None => {}
+        // }
 
         let result : DataSeries<I, V> = DataSeries {
             index: axis,
@@ -241,14 +271,42 @@ mod tests {
     }
 
     #[test]
-    fn test_get_projection() {
+    fn test_get_projection_countable() {
         let mut ds: DataSeries<f32, f32> = DataSeries::new();
-        assert!(ds.push(1., 2.));
-        assert!(ds.push(3., 4.));
-        let new_axis: Vec<f32> = vec![1.,2.];
+        ds.push(1., 2.);
+        ds.push(3., 3.);
+        ds.push(5., 7.);
+        ds.push(10., 0.);
+        let new_axis: Vec<f32> = vec![1.,2., 3., 4., 5.];
         let proj = ds.get_projection(&new_axis, ValueType::Countable);
-        println!("{}", proj);
-        assert!(true);
+        assert_eq!(proj.index, vec![1.,2., 3., 4.]);
+        assert_eq!(proj.values, vec![1.,1., 1.5, 1.5]);
+
+        let new_axis: Vec<f32> = vec![1.,5., 6.];
+        let proj = ds.get_projection(&new_axis, ValueType::Countable);
+        assert_eq!(proj.index, vec![1.,5.]);
+        assert_eq!(proj.values, vec![5., 1.4]);
+        
+    }
+
+
+    #[test]
+
+    fn test_get_projection_non_countable() {
+        let mut ds: DataSeries<f32, f32> = DataSeries::new();
+        ds.push(1., 2.);
+        ds.push(3., 3.);
+        ds.push(5., 7.);
+        ds.push(10., 0.);
+        let new_axis: Vec<f32> = vec![1.,2., 3., 4., 5.];
+        let proj = ds.get_projection(&new_axis, ValueType::NonCountable);
+        assert_eq!(proj.index, vec![1.,2., 3., 4.]);
+        assert_eq!(proj.values, vec![2.,2., 3., 3.]);
+
+        let new_axis: Vec<f32> = vec![1.,5., 6.];
+        let proj = ds.get_projection(&new_axis, ValueType::NonCountable);
+        assert_eq!(proj.index, vec![1.,5.]);
+        assert_eq!(proj.values, vec![2.5, 7.]);
     }
 
 }
