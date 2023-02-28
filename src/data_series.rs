@@ -131,50 +131,45 @@ where
                      &interval_old[1]
                  };
               
-                match value_type {
+                let compute_value_to_add = | interval: &[I]| -> V {
+                    let interval_len = interval[1] - interval[0]; 
+                    let value_old = &self.values[i_o];
+                    let frac = (*boundary_right - *boundary_left) / interval_len;
+                    *value_old * frac
+                };
+
+                let value_to_add = match value_type {
                     ValueType::Countable => {
-                        let interval_old_len = interval_old[1] - interval_old[0]; 
-                        let value_old = &self.values[i_o];
-                        let frac = (*boundary_right - *boundary_left) / interval_old_len;
-                        let value_old_rescaled = *value_old * frac;
-                        if i_n >= values.len() {
-                            values.push(value_old_rescaled);
-                            axis.push(interval_new[0]);
-                        } else {
-                            values[i_n] = values[i_n] + value_old_rescaled;
-                        }
+                        compute_value_to_add(interval_old)
                     },
                     ValueType::NonCountable => {
-                        let interval_new_len = interval_new[1] - interval_new[0]; 
-                        let value_old = &self.values[i_o];
-                        let frac = (*boundary_right - *boundary_left) / interval_new_len;
-                        let value_old_rescaled = *value_old * frac;
-                        if i_n >= values.len() {
-                            values.push(value_old_rescaled);
-                            axis.push(interval_new[0]);
-                        } else {
-                            values[i_n] = values[i_n] + value_old_rescaled;
-                        }
+                        compute_value_to_add(interval_new)
                     }
-                } 
+                };
+                if i_n >= values.len() {
+                    values.push(value_to_add);
+                    axis.push(interval_new[0]);
+                } else {
+                    values[i_n] = values[i_n] + value_to_add;
+                }
             }
         }
 
         // For last interval in new, check if "artifical" interval can be created
-        // match new_axis.last() {
-        //     Some(&last_idx) => {
-        //         let val = self.index.windows(2).enumerate().find(|x| {
-        //             x.1[0] >= last_idx && x.1[1] <= last_idx
-        //         });
-        //         match val {
-        //             Some(val_) => {
+        match new_axis.last() {
+            Some(&last_idx) => {
+                let val = self.index.windows(2).enumerate().find(|x| {
+                    x.1[0] >= last_idx && x.1[1] <= last_idx
+                });
+                match val {
+                    Some(val_) => {
 
-        //             },
-        //             None => {}
-        //         }
-        //     },
-        //     None => {}
-        // }
+                    },
+                    None => {}
+                }
+            },
+            None => {}
+        }
 
         let result : DataSeries<I, V> = DataSeries {
             index: axis,
