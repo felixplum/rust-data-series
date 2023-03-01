@@ -48,41 +48,23 @@ where
 
     pub fn push(&mut self, index: I, value: V) -> bool
     {
-        let mut push_data = true;
-        match self.index.last() {
-            Some(index_val) => {
-                push_data = index_val < &index;
-            },
-            None => ()
+        if let Some(index_val) = self.index.last() {
+            if index_val >= &index {return false;}
         }
-        if push_data {
-            self.index.push(index);
-            self.values.push(value);
-        }
-        return push_data;
+        self.index.push(index);
+        self.values.push(value);
+        true
     }
 
     pub fn push_if_different(&mut self, index: I, value: V, tolerance: f32) -> bool
     where
         V: norms::L1
     {
-        let mut push_data = true;
-        match self.values.last() {
-            Some(val_last) => {
-                let diff = norms::L1::compute(&value, val_last);
-                if diff > 0. {
-                    push_data = diff >= tolerance 
-                } else {
-                    push_data = diff <= tolerance 
-                }
-            },
-            None => ()
+        if let Some(val_last) =  self.values.last() {
+            let diff = norms::L1::compute(&value, val_last);
+            if diff < tolerance && diff > -tolerance { return false;}
         }
-        if push_data {
-            return self.push(index, value);
-        } else {
-            return false;
-        }
+        self.push(index, value)
     }
 
     pub fn set_invalid_access_policy(&mut self, policy: InvalidAccessPolicy) {
@@ -262,7 +244,9 @@ mod tests {
     fn test_push_if_different() {
         let mut ds = create_dataseries();
         assert!(!ds.push_if_different(10, 5.9, 1.));
+        assert!(!ds.push_if_different(10, 4.1, 1.));
         assert!(ds.push_if_different(10, 6., 1.));
+        assert!(ds.push_if_different(11, 4., 1.));
     }
 
     #[test]
