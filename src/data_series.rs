@@ -79,21 +79,32 @@ where
     //     return (&self.index, &self.values);
     // }
 
-    fn get_projection<J>(&self, new_axis: &Vec<I>, value_type: ValueType) -> DataSeries<I, V>
+    fn get_projection<J>(&self, index_new: &Vec<I>, value_type: ValueType) -> DataSeries<I, V>
     where
         I: std::ops::Sub<Output = J> + Copy, // index_a<I> - index_b<I> = interval<J>
         J: std::ops::Div<Output = f32>,      // interval_a<J> / interval_b<J> = fraction<f32>
         V: std::ops::Mul<f32, Output = V> + std::ops::Add<Output = V> + Copy
     {
-        let mut axis: Vec<I> = Vec::new();
+        let mut axis: Vec<I> = index_new.to_vec();
         let mut values: Vec<V> = Vec::new();
-        axis.reserve(new_axis.len());
-        values.reserve(new_axis.len());
+        values.reserve(axis.len());
 
         assert_eq!(self.index.len(), self.values.len());
+
+        // If new index intersects interval in old axis, extend it to match
+        let mut is_index_new_extended = false;
+        if let Some(&last_idx_new) = axis.last() {
+            let interval_old_last_ = self.index.windows(2).enumerate().find(|x| {
+                x.1[0] <= last_idx_new && x.1[1] > last_idx_new
+            });
+            if let Some(interval_old_last) = interval_old_last_ {
+                axis.push(interval_old_last.1[1]);
+                is_index_new_extended = true;
+            }
+        }
         
         // let mut i_o_last = 0;
-        for (i_n, interval_new) in new_axis.windows(2).enumerate() {
+        for (i_n, interval_new) in axis.windows(2).enumerate() {
             // i_o_last = if i_o_last > 0 {i_o_last - 1} else {0};
             for (i_o, interval_old) in self.index.windows(2).enumerate() {
                 // Intervals overlapping?
@@ -130,29 +141,13 @@ where
                 };
                 if i_n >= values.len() {
                     values.push(value_to_add);
-                    axis.push(interval_new[0]);
                 } else {
                     values[i_n] = values[i_n] + value_to_add;
                 }
             }
         }
-
-        // For last interval in new, check if "artifical" interval can be created
-        match new_axis.last() {
-            Some(&last_idx) => {
-                let val = self.index.windows(2).enumerate().find(|x| {
-                    x.1[0] >= last_idx && x.1[1] <= last_idx
-                });
-                match val {
-                    Some(val_) => {
-
-                    },
-                    None => {}
-                }
-            },
-            None => {}
-        }
-
+        if is_index_new_extended { axis.pop(); }
+        
         let result : DataSeries<I, V> = DataSeries {
             index: axis,
             values: values,
@@ -256,15 +251,15 @@ mod tests {
         ds.push(3., 3.);
         ds.push(5., 7.);
         ds.push(10., 0.);
-        let new_axis: Vec<f32> = vec![1.,2., 3., 4., 5.];
-        let proj = ds.get_projection(&new_axis, ValueType::Countable);
-        assert_eq!(proj.index, vec![1.,2., 3., 4.]);
-        assert_eq!(proj.values, vec![1.,1., 1.5, 1.5]);
+        let index_new: Vec<f32> = vec![1.,2., 3., 4., 5.];
+        let proj = ds.get_projection(&index_new, ValueType::Countable);
+        assert_eq!(proj.index, vec![1.,2., 3., 4., 5.]);
+        assert_eq!(proj.values, vec![1.,1., 1.5, 1.5, 7.]);
 
-        let new_axis: Vec<f32> = vec![1.,5., 6.];
-        let proj = ds.get_projection(&new_axis, ValueType::Countable);
-        assert_eq!(proj.index, vec![1.,5.]);
-        assert_eq!(proj.values, vec![5., 1.4]);
+        let index_new: Vec<f32> = vec![1.,5., 6.];
+        let proj = ds.get_projection(&index_new, ValueType::Countable);
+        assert_eq!(proj.index, vec![1.,5., 6.]);
+        assert_eq!(proj.values, vec![5., 1.4, 5.6]);
         
     }
 
@@ -277,15 +272,15 @@ mod tests {
         ds.push(3., 3.);
         ds.push(5., 7.);
         ds.push(10., 0.);
-        let new_axis: Vec<f32> = vec![1.,2., 3., 4., 5.];
-        let proj = ds.get_projection(&new_axis, ValueType::NonCountable);
-        assert_eq!(proj.index, vec![1.,2., 3., 4.]);
-        assert_eq!(proj.values, vec![2.,2., 3., 3.]);
+        let index_new: Vec<f32> = vec![1.,2., 3., 4., 5.];
+        let proj = ds.get_projection(&index_new, ValueType::NonCountable);
+        assert_eq!(proj.index, vec![1.,2., 3., 4., 5.]);
+        assert_eq!(proj.values, vec![2.,2., 3., 3., 7.]);
 
-        let new_axis: Vec<f32> = vec![1.,5., 6.];
-        let proj = ds.get_projection(&new_axis, ValueType::NonCountable);
-        assert_eq!(proj.index, vec![1.,5.]);
-        assert_eq!(proj.values, vec![2.5, 7.]);
+        let index_new: Vec<f32> = vec![1.,5., 6.];
+        let proj = ds.get_projection(&index_new, ValueType::NonCountable);
+        assert_eq!(proj.index, vec![1.,5., 6.]);
+        assert_eq!(proj.values, vec![2.5, 7., 7.]);
     }
 
 }
