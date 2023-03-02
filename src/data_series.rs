@@ -60,6 +60,7 @@ where
     where
         V: norms::L1
     {
+        debug_assert!(tolerance >= 0.);
         if let Some(val_last) =  self.values.last() {
             let diff = norms::L1::compute(&value, val_last);
             if diff < tolerance && diff > -tolerance { return false;}
@@ -85,47 +86,68 @@ where
         J: std::ops::Div<Output = f32>,      // interval_a<J> / interval_b<J> = fraction<f32>
         V: std::ops::Mul<f32, Output = V> + std::ops::Add<Output = V> + Copy
     {
-        let mut axis: Vec<I> = index_new.to_vec();
-        let mut values: Vec<V> = Vec::new();
-        values.reserve(axis.len());
+
+        let mut result : DataSeries<I, V> = DataSeries {
+            index: Vec::<I>::new(),
+            values: Vec::<V>::new(),
+            invalid_access_policy: self.invalid_access_policy.clone()
+        };
+
+        result.index.reserve(index_new.len());
+        result.values.reserve(index_new.len());
 
         assert_eq!(self.index.len(), self.values.len());
 
-        // If new index intersects interval in old axis, extend it to match
-        let mut is_index_new_extended = false;
-        if let Some(&last_idx_new) = axis.last() {
-            let interval_old_last_ = self.index.windows(2).enumerate().find(|x| {
-                x.1[0] <= last_idx_new && x.1[1] > last_idx_new
-            });
-            if let Some(interval_old_last) = interval_old_last_ {
-                axis.push(interval_old_last.1[1]);
-                is_index_new_extended = true;
-            }
+        struct Interval<T> {
+            lb: T,
+            ub: T
         }
-        
-        // let mut i_o_last = 0;
-        for (i_n, interval_new) in axis.windows(2).enumerate() {
-            // i_o_last = if i_o_last > 0 {i_o_last - 1} else {0};
-            for (i_o, interval_old) in self.index.windows(2).enumerate() {
+
+        let mut interval_new: Interval<I>;
+        let mut interval_old: Interval<I>;
+
+        for i_n in 0..index_new.len() {
+
+            if i_n < index_new.len() - 1 {
+                interval_new = Interval { lb: index_new[i_n], ub: index_new[i_n+1] };
+            } else 
+            // Check if last index value intersects interval of original index
+            {
+                let last_idx_new = index_new[i_n];
+                let interval_old_last_ = self.index.windows(2).enumerate().find(|x| {
+                    x.1[0] <= last_idx_new && x.1[1] > last_idx_new
+                });
+                if let Some(interval_old_last) = interval_old_last_ {
+                    interval_new = Interval { lb: index_new[i_n], ub: interval_old_last.1[1] };
+                } else {
+                    break;
+                }
+            }
+            
+            for (i_o, interval_old_) in self.index.windows(2).enumerate() {
+                interval_old = Interval {
+                    lb : interval_old_[0],
+                    ub : interval_old_[1]
+                };
+            
                 // Intervals overlapping?
-                if interval_old[1] <= interval_new[0] || interval_old[0] >= interval_new[1] {
+                if interval_old.ub <= interval_new.lb || interval_old.lb >= interval_new.ub {
                     continue;
                 }
-                // i_o_last = i_o;
                 // Determnine left and right boundary of overlapping interval
-                let boundary_left = if interval_old[0] > interval_new[0]  {
-                   &interval_old[0] 
+                let boundary_left = if interval_old.lb > interval_new.lb {
+                   &interval_old.lb
                 } else {
-                    &interval_new[0]
+                    &interval_new.lb
                 };
-                let boundary_right = if interval_old[1] > interval_new[1]  {
-                    &interval_new[1] 
+                let boundary_right = if interval_old.ub > interval_new.ub {
+                    &interval_new.ub
                  } else {
-                     &interval_old[1]
+                     &interval_old.ub
                  };
               
-                let compute_value_to_add = | interval: &[I]| -> V {
-                    let interval_len = interval[1] - interval[0]; 
+                let compute_value_to_add = | interval: &Interval<I>| -> V {
+                    let interval_len = interval.ub - interval.lb; 
                     let value_old = &self.values[i_o];
                     let frac = (*boundary_right - *boundary_left) / interval_len;
                     *value_old * frac
@@ -133,27 +155,23 @@ where
 
                 let value_to_add = match value_type {
                     ValueType::Countable => {
-                        compute_value_to_add(interval_old)
+                        compute_value_to_add(&interval_old)
                     },
                     ValueType::NonCountable => {
-                        compute_value_to_add(interval_new)
+                        compute_value_to_add(&interval_new)
                     }
                 };
-                if i_n >= values.len() {
-                    values.push(value_to_add);
+                if i_n >= result.values.len() {
+                    result.values.push(value_to_add);
+                    result.index.push(index_new[i_n]);
                 } else {
-                    values[i_n] = values[i_n] + value_to_add;
+                    result.values[i_n] = result.values[i_n] + value_to_add;
                 }
             }
         }
-        if is_index_new_extended { axis.pop(); }
-        
-        let result : DataSeries<I, V> = DataSeries {
-            index: axis,
-            values: values,
-            invalid_access_policy: self.invalid_access_policy.clone()
-        };
-        return result
+    
+        result
+
     }
 
     pub fn at(&self, index: &I) -> Option<&V> {
@@ -281,6 +299,16 @@ mod tests {
         let proj = ds.get_projection(&index_new, ValueType::NonCountable);
         assert_eq!(proj.index, vec![1.,5., 6.]);
         assert_eq!(proj.values, vec![2.5, 7., 7.]);
+    }
+
+    #[test]
+    fn test_get_projection_edges() {
+        let ds: DataSeries<f32, f32> = DataSeries::new();
+        let index_new: Vec<f32> = vec![1.,2., 3., 4., 5.];
+        let proj = ds.get_projection(&index_new, ValueType::NonCountable);
+        assert_eq!(proj.index, vec![]);
+        assert_eq!(proj.values, vec![]);
+        // TODO: Case where indices don't match in beginning or end
     }
 
 }
